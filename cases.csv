@@ -1,0 +1,273 @@
+case_id,symptom,topology_note,show_outputs,expected_fault,osi_layer,concept_tag,severity
+NET-001,PC1 cannot reach Server1 in VLAN 30.,PC1 (VLAN 10) and Server1 (VLAN 30) are on the same L3 switch with router-on-a-stick sub-interfaces for inter-VLAN routing.,"R1# show interfaces GigabitEthernet0/0.10
+GigabitEthernet0/0.10 is up, line protocol is up
+  Internet address is 192.168.10.1/24
+  Encapsulation 802.1Q Virtual LAN, Vlan ID 10.
+
+R1# show interfaces GigabitEthernet0/0.30
+GigabitEthernet0/0.30 is administratively down, line protocol is down
+  Internet address is 192.168.30.1/24
+  Encapsulation 802.1Q Virtual LAN, Vlan ID 30.
+",Inter-VLAN routing failure because the VLAN 30 router sub-interface is administratively down.,Layer 3,VLAN,High
+NET-002,New laptop on the Sales VLAN cannot get an IP address and shows APIPA (169.254.x.x).,Sales VLAN 20 uses a DHCP relay (ip helper-address) pointing to a central DHCP server on VLAN 1.,"SW1# show running-config interface vlan 20
+interface Vlan20
+ ip address 192.168.20.1 255.255.255.0
+ no ip helper-address
+
+SW1# show ip dhcp binding
+IP address       Client-ID/       Lease expiration        Type
+                  Hardware address
+(no bindings for VLAN 20 clients)
+","Missing 'ip helper-address' on VLAN 20 SVI, so DHCP DISCOVER broadcasts never reach the DHCP server.",Layer 3,DHCP,High
+NET-003,Users can browse to internal servers by IP but not by hostname (e.g. intranet.corp.local fails).,All internal hosts use DHCP-assigned DNS pointing to the internal DNS server 10.10.1.53.,"PC1> ipconfig /all
+   IPv4 Address. . . . . . . . . . : 10.10.5.44
+   Default Gateway . . . . . . . . : 10.10.5.1
+   DNS Servers . . . . . . . . . . : 10.10.1.53
+
+PC1> ping 10.10.1.53
+Request timed out. (4/4 lost)
+
+R1# show ip route 10.10.1.53
+% Network not in table
+","No route to the DNS server subnet (10.10.1.0/24) in the routing table, so DNS queries silently fail while direct IP traffic to reachable hosts works.",Layer 3,DNS,Medium
+NET-004,Branch office (192.168.50.0/24) cannot reach HQ subnet (192.168.1.0/24) over the WAN link.,Branch and HQ routers are connected via a point-to-point serial link running static routing.,"BranchR# show ip route
+Gateway of last resort is not set
+
+     192.168.50.0/24 is directly connected, GigabitEthernet0/0
+     10.0.0.0/30 is directly connected, Serial0/0/0
+(no route to 192.168.1.0/24)
+
+BranchR# show run | include ip route
+(no static routes configured)
+",Missing static route (or default route) toward the HQ subnet 192.168.1.0/24 via the serial WAN link.,Layer 3,Routing,High
+NET-005,HR staff can reach the file server but Finance staff on a different VLAN are unexpectedly blocked from it too.,An ACL was recently applied on the L3 switch's Finance VLAN interface to restrict access to the HR subnet only.,"SW1# show access-lists 101
+Extended IP access list 101
+    10 deny ip 192.168.40.0 0.0.0.255 192.168.10.0 0.0.0.255
+    20 deny ip any any
+
+SW1# show ip interface Vlan40 | include access list
+  Outgoing access list is 101
+","ACL 101 ends with an explicit 'deny ip any any' with no preceding permit statements, blocking all Finance VLAN traffic, not just the intended HR subnet restriction.",Layer 3,ACL,Critical
+NET-006,Internal hosts behind the edge router cannot reach any Internet websites.,Edge router R1 connects the internal LAN (10.0.0.0/24) to the ISP via Gi0/1; NAT overload was configured to translate to the public interface.,"R1# show ip nat translations
+(no translations present)
+
+R1# show run | section ip nat
+ip nat inside source list 1 interface GigabitEthernet0/1 overload
+interface GigabitEthernet0/0
+ ip address 10.0.0.1 255.255.255.0
+interface GigabitEthernet0/1
+ ip address 203.0.113.5 255.255.255.252
+
+R1# show ip access-lists 1
+Standard IP access list 1
+    10 permit 10.0.0.0 0.0.0.255
+","Neither Gi0/0 nor Gi0/1 has been marked as 'ip nat inside' / 'ip nat outside', so NAT overload never triggers even though the translation rule and ACL are correct.",Layer 3,NAT,High
+NET-007,"Guest wireless users can see and print to an internal office printer, violating guest isolation policy.","The WLC maps the 'Guest-WiFi' SSID to VLAN 99, which should be isolated from the internal VLANs.","WLC# show wlan 2
+WLAN Identifier.......... 2
+Profile Name.............. Guest-WiFi
+Network Name (SSID)........ Guest-WiFi
+Interface.................. management
+
+WLC# show interface summary
+Interface Name    VLAN Identifier
+management         99
+guest-vlan         99
+","Guest-WiFi WLAN is bound to the 'management' interface instead of the dedicated 'guest-vlan' interface, placing guest traffic on the same VLAN as management/internal traffic.",Layer 2,Wireless,Critical
+NET-008,PC2 has full connectivity to the local subnet but cannot reach any remote network.,PC2 is a statically configured host on 192.168.5.0/24 behind gateway router R2.,"PC2> ipconfig
+   IPv4 Address. . . . . . . . . . : 192.168.5.50
+   Subnet Mask . . . . . . . . . . : 255.255.255.0
+   Default Gateway . . . . . . . . : 192.168.6.1
+
+PC2> ping 192.168.5.1
+Reply from 192.168.5.1: bytes=32 time=1ms TTL=255
+
+PC2> ping 8.8.8.8
+Request timed out. (4/4 lost)
+","Default gateway on PC2 (192.168.6.1) is outside its own subnet (192.168.5.0/24) and does not match the real gateway (192.168.5.1), so all off-subnet traffic fails.",Layer 3,Gateway,Medium
+NET-009,Two devices on the same VLAN intermittently lose connectivity and event logs show duplicate address warnings.,Servers on VLAN 10 are statically addressed; a new server was added by a junior admin last week.,"SW1# show ip arp | include Vlan10
+Internet  192.168.10.20      -   0050.56aa.1122  ARPA   Vlan10
+Internet  192.168.10.20      -   0050.56bb.3344  ARPA   Vlan10
+
+%IP-4-DUPADDR: Duplicate address 192.168.10.20 on Vlan10, sourced by 0050.56bb.3344
+","Duplicate IP address 192.168.10.20 assigned to two different MAC addresses on VLAN 10, causing ARP conflicts and intermittent loss.",Layer 3,Routing,Medium
+NET-010,Trunk link between two switches is dropping VLAN 30 traffic only; other VLANs cross fine.,"SW1 and SW2 are connected via a trunk carrying VLANs 10, 20, and 30.","SW1# show interfaces trunk
+Port        Mode       Encapsulation  Status       Native vlan
+Gi0/1       on         802.1q         trunking     1
+
+Port        Vlans allowed on trunk
+Gi0/1       10,20
+
+SW1# show vlan brief | include 30
+30   Servers                          active
+","VLAN 30 is not included in the trunk's allowed VLAN list on Gi0/1, so its traffic is pruned from the trunk even though the VLAN exists on the switch.",Layer 2,VLAN,High
+NET-011,"Newly connected PC in the Marketing office gets no DHCP address at all, not even APIPA.",Marketing VLAN 25 access port was just patched into a new switch port by facilities staff.,"SW2# show interfaces GigabitEthernet0/5 status
+Port      Name               Status       Vlan       Duplex  Speed
+Gi0/5                        disabled     25         auto    auto
+
+SW2# show run interface Gi0/5
+interface GigabitEthernet0/5
+ switchport access vlan 25
+ switchport mode access
+ shutdown
+","Access port Gi0/5 is administratively shut down, so the PC has no Layer 1/2 connectivity at all and never sends a DHCP request.",Layer 1,DHCP,Medium
+NET-012,Remote office users report that internal web app URLs resolve to the wrong (old) IP address.,DNS was recently migrated to a new internal server; app record was repointed to a new load balancer IP.,"DNS1# show hosts
+Default domain is corp.local
+Name/address lookup uses domain service
+Host                       Flags      Age Type   Address
+app.corp.local             (perm, OK)  40 IP     10.10.2.15
+
+# Load balancer's actual current address:
+# 10.10.2.115
+",Stale/incorrect A record for app.corp.local still points to the decommissioned IP 10.10.2.15 instead of the current load balancer address 10.10.2.115.,Layer 7,DNS,Medium
+NET-013,Remote branch loses connectivity to HQ every time the primary WAN link flaps; backup link never takes over.,Branch router has a primary route via Serial0/0/0 and a floating static backup route via Serial0/0/1.,"BranchR# show ip route static
+S    192.168.1.0/24 [1/0] via 10.0.0.1
+S    192.168.1.0/24 [1/0] via 10.0.1.1
+
+BranchR# show run | include ip route
+ip route 192.168.1.0 255.255.255.0 10.0.0.1
+ip route 192.168.1.0 255.255.255.0 10.0.1.1
+","The backup static route was configured with the same administrative distance (1) as the primary instead of a higher floating AD, so it is never truly a backup and both routes load-balance/conflict instead of failing over cleanly.",Layer 3,Routing,Medium
+NET-014,External partners cannot reach the company's public-facing web server even though it works fine internally.,Web server sits in a DMZ behind the edge router; static NAT should map its private IP to a public IP.,"EdgeR# show ip nat translations
+(no static translations present)
+
+EdgeR# show run | include ip nat
+ip nat inside source list 1 interface GigabitEthernet0/1 overload
+(no static NAT entry for the web server)
+","No static NAT (ip nat inside source static) entry exists for the DMZ web server, so only outbound-initiated overload NAT works; inbound connections from the Internet have nothing to translate to.",Layer 3,NAT,Critical
+NET-015,A subset of hosts on the Accounting VLAN cannot reach the printer server; others on the same VLAN work fine.,Affected hosts were recently re-imaged and given static IPs by IT following a naming convention change.,"PC5> ipconfig
+   IPv4 Address. . . . . . . . . . : 192.168.15.80
+   Subnet Mask . . . . . . . . . . : 255.255.255.192
+   Default Gateway . . . . . . . . : 192.168.15.1
+
+# Printer server address: 192.168.15.140
+# VLAN 15 subnet is documented as /26 (255.255.255.192), 4 blocks of 64
+","Incorrect subnet mask (/26) puts PC5 (192.168.15.80, third /26 block) and the printer server (192.168.15.140, fourth /26 block) in different subnets, even though they appear to share VLAN 15.",Layer 3,Gateway,Medium
+NET-016,Voice VLAN phones register fine but data VLAN traffic from PCs behind the phones is being dropped intermittently.,Access ports use a single switchport with both a voice VLAN and a data VLAN configured (phone daisy-chained to PC).,"SW3# show run interface Gi0/12
+interface GigabitEthernet0/12
+ switchport access vlan 12
+ switchport voice vlan 112
+ switchport mode access
+ spanning-tree portfast
+
+SW3# show vlan brief | include 12
+12   Data-Floor2                     active
+112  Voice-Floor2                     active
+",Configuration matches the intended design (data VLAN 12 + voice VLAN 112); insufficient evidence points to a VLAN misconfiguration — additional evidence (interface error counters / duplex-speed) is needed before concluding root cause.,Layer 2,VLAN,Low
+NET-017,A pool of DHCP addresses runs out every Monday morning and new employees cannot get an IP until afternoon.,Office VLAN 30 (192.168.30.0/24) uses a locally-scoped DHCP pool on the L3 switch with an 8-hour default lease.,"SW1# show ip dhcp pool OFFICE-30
+Pool OFFICE-30 :
+ Utilization mark (high/low)    : 100 / 0
+ Subnet size (first/last)       : 0 / 0
+ Total addresses                : 254
+ Leased addresses               : 254
+ Excluded addresses             : 10
+ Pending event                  : none
+
+SW1# show run | section dhcp pool OFFICE-30
+ip dhcp pool OFFICE-30
+ network 192.168.30.0 255.255.255.0
+ lease 8
+","DHCP pool OFFICE-30 is fully exhausted (254/254 leased) with an 8-hour lease that doesn't expire quickly enough for morning turnover, causing new devices to be denied addresses until leases age out.",Layer 3,DHCP,High
+NET-018,"Employees can access internal file shares by IP, and DNS resolves fine, but browsing internal sites by name still times out.",An ACL was added to the core switch last week to restrict a set of ports for a security audit.,"Core# show access-lists 110
+Extended IP access list 110
+    10 permit tcp any any eq 445
+    20 permit tcp any any eq 22
+    30 deny tcp any any eq 80
+    40 deny tcp any any eq 443
+    50 permit ip any any
+","ACL 110 explicitly denies TCP ports 80 and 443 (HTTP/HTTPS), blocking web traffic to internal sites while unrelated protocols like SMB (445) and SSH (22) remain unaffected.",Layer 4,ACL,High
+NET-019,A newly deployed AP's SSID broadcasts but no client can successfully associate; they see the network but authentication always fails.,The new AP was configured to match the existing corporate SSID using WPA2-Enterprise with RADIUS.,"AP1# show running-config | section wlan
+wlan Corp-Secure 3 Corp-Secure
+ security wpa wpa2
+ security dot1x authentication-list default
+
+AP1# show aaa servers
+RADIUS: id 1, priority 1, host 10.10.9.9, auth-port 1812
+  State: current UP, duration 00h02m, previous duration 0h
+  Dead: total time 0h0m, count 0
+  Quarantined: No
+  Authen: request 0 timeouts 0
+","RADIUS server shows zero authentication requests received despite clients attempting to connect, suggesting a shared-secret or authentication-list mismatch between the new AP and RADIUS server — additional evidence (client-side EAP logs) is needed to confirm.",Layer 2,Wireless,High
+NET-020,"After a router reload, all remote sites became unreachable from HQ even though local HQ subnets work fine.",HQ router uses OSPF for dynamic routing to reach all branch subnets.,"HQ-R1# show ip route ospf
+(no OSPF routes in routing table)
+
+HQ-R1# show ip ospf neighbor
+(no output)
+
+HQ-R1# show run | section router ospf
+(no OSPF process configured)
+","OSPF process configuration was lost after the reload (not saved to startup-config), so no dynamic routes to branch subnets are being learned.",Layer 3,Routing,Critical
+NET-021,"Contractor laptop plugged into a conference room port cannot reach the Internet, but reaches internal servers fine.",Conference room port is on VLAN 40 which uses NAT overload via a dedicated ACL matching only IT-approved subnets.,"R1# show ip access-lists 5
+Standard IP access list 5
+    10 permit 192.168.10.0 0.0.0.255
+    20 permit 192.168.20.0 0.0.0.255
+
+R1# show run | include ip nat inside source
+ip nat inside source list 5 interface GigabitEthernet0/1 overload
+
+# Conference room VLAN 40 subnet: 192.168.40.0/24
+","NAT ACL 5 does not include the conference room subnet 192.168.40.0/24, so its traffic is never translated and cannot reach the Internet, while pre-approved subnets 10 and 20 work normally.",Layer 3,NAT,Medium
+NET-022,Two switches connected by a redundant link pair are experiencing a broadcast storm and flooding the network.,SW1 and SW2 have two physical links between them for redundancy.,"SW1# show spanning-tree summary
+Switch is in pvst mode
+Root bridge for: none
+EtherChannel misconfig guard is enabled
+Spanning tree protocol is disabled
+
+SW1# show interfaces status | include connected
+Gi0/1      connected    1          a-full  a-1000
+Gi0/2      connected    1          a-full  a-1000
+","Spanning Tree Protocol is disabled on SW1, so the redundant link pair between SW1 and SW2 forms a Layer 2 loop with no blocking mechanism, causing a broadcast storm.",Layer 2,Routing,Critical
+NET-023,"Wireless guest users report very slow speeds and frequent disconnects near the lobby, but not elsewhere in the building.",Lobby AP was recently changed from channel 6 to match a neighboring tenant's suggestion.,"LobbyAP# show controllers dot11Radio 0 | include Channel
+Channel: 6 (interference detected: HIGH)
+
+LobbyAP# show wireless statistics | include retries
+Tx retries: 41% (elevated)
+",High channel interference and elevated Tx retry rate on channel 6 in the lobby suggest RF interference from a neighboring network — additional evidence (spectrum/site survey) is needed to fully confirm before recommending a channel change.,Layer 1,Wireless,Low
+NET-024,"A single PC on the Engineering VLAN cannot reach anything, including its own default gateway, while neighboring ports work.",Engineering VLAN 18 access port was recently moved to a new patch panel location.,"SW4# show interfaces GigabitEthernet0/9 status
+Port      Name               Status       Vlan       Duplex  Speed
+Gi0/9                        notconnect   18         auto    auto
+
+SW4# show interfaces GigabitEthernet0/9
+GigabitEthernet0/9 is down, line protocol is down (notconnect)
+",Physical link is down on Gi0/9 (notconnect) — most likely a bad patch cable or wrong patch-panel port following the recent move — preventing any Layer 2/3 connectivity from that PC.,Layer 1,Gateway,Medium
+NET-025,Internal DNS resolves external domains (like google.com) but internal corp.local domains fail to resolve.,Internal DNS server is configured as a forwarder-only setup for external queries and should be authoritative for corp.local.,"DNS1# show running-config | section dns
+ip domain lookup
+ip name-server 8.8.8.8
+(no local DNS zone or host entries for corp.local configured)
+","The DNS server has no authoritative zone or static host entries configured for corp.local, so internal name resolution silently falls through to the external forwarder, which has no record of internal hosts.",Layer 7,DNS,High
+NET-026,"After enabling a new security ACL, remote administrators using SSH to manage the router were unexpectedly locked out.",ACL 115 was applied inbound on the WAN interface to restrict management access to a single admin subnet.,"R1# show access-lists 115
+Extended IP access list 115
+    10 permit tcp 203.0.113.0 0.0.0.255 any eq 22
+    20 deny ip any any log
+
+R1# show run | include access-group
+ip access-group 115 in
+
+# Admin subnet is actually 203.0.113.64/26, not 203.0.113.0/24
+","ACL 115's permit statement uses the wrong source subnet (203.0.113.0/24 instead of the actual admin subnet 203.0.113.64/26), so legitimate SSH traffic falls through to the deny-all and is blocked.",Layer 4,ACL,Critical
+NET-027,"Hosts in the new Warehouse VLAN can ping each other but cannot reach any other VLAN, including the server VLAN.",Warehouse VLAN 60 was newly created and an SVI was added to the L3 switch for inter-VLAN routing.,"SW1# show vlan brief | include 60
+60   Warehouse                        active
+
+SW1# show ip interface brief | include Vlan60
+Vlan60                 unassigned      YES unset  down                  down
+","VLAN 60's SVI (interface Vlan60) has no IP address assigned and is administratively/operationally down, so there is no Layer 3 gateway for inter-VLAN routing despite Layer 2 connectivity within the VLAN working.",Layer 3,VLAN,High
+NET-028,"Remote workers using the site-to-site VPN can reach HQ servers, but HQ users cannot initiate connections back to the remote site's servers.",Site-to-site NAT and routing are configured; some asymmetric traffic pattern is suspected.,"HQ-R1# show ip route 192.168.99.0
+% Network not in table
+
+HQ-R1# show crypto session
+Interface: Tunnel0
+Session status: UP-ACTIVE
+Peer: 198.51.100.10
+","VPN tunnel is up, but HQ has no route to the remote site's subnet 192.168.99.0/24, so HQ-initiated traffic has nowhere to be routed even though the remote site can reach HQ (likely due to a default route there).",Layer 3,Routing,High
+NET-029,Guest WiFi users occasionally get an internal corporate IP address instead of the intended guest range.,Guest VLAN 99 and internal VLAN 10 both have DHCP pools configured on the same central DHCP server.,"DHCP1# show ip dhcp pool
+Pool GUEST-99 :
+ Network 172.16.99.0 255.255.255.0
+Pool CORP-10 :
+ Network 172.16.99.0 255.255.255.0
+","DHCP pool CORP-10 is misconfigured with the same network (172.16.99.0/24) as GUEST-99, causing an overlapping scope that randomly hands out addresses meant for the corporate pool to guest devices.",Layer 3,DHCP,Critical
+NET-030,"A branch office's outbound web traffic works, but all inbound VoIP calls from HQ fail to connect.",Branch uses PAT (NAT overload) for general Internet traffic; VoIP requires a static NAT mapping for its SIP trunk IP.,"BranchR# show ip nat translations | include 5060
+(no translations for port 5060)
+
+BranchR# show run | include ip nat
+ip nat inside source list 1 interface GigabitEthernet0/1 overload
+(no static port-forward entry for SIP/5060)
+","No static NAT/port-forward rule exists for SIP signaling (UDP/TCP 5060) toward the VoIP gateway, so inbound call setup from HQ has no translation target even though general outbound PAT works fine.",Layer 4,NAT,High
